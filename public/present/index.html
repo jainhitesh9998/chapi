@@ -23,32 +23,19 @@
 
   <script src="https://unpkg.com/web-credential-handler@2/dist/web-credential-handler.min.js"></script>
   <script>
-    // Two ways this hands off to the app, tried in order:
-    //  1. Universal Link (LAUNCH_ORIGIN + /launch?u=<raw target>) — domain-bound
-    //     via the app's com.apple.developer.associated-domains entitlement +
-    //     the apple-app-site-association hosted on this origin. A competing
-    //     wallet cannot register this origin, so this is the bullet-proof form.
-    //  2. careerpassport-infy-*/careerpassport-interaction: custom scheme —
-    //     mirrors shared/qrHandlers/handlers/chapiDeepLink.ts's rewrite table.
-    //     App-exclusive in practice (no other wallet plausibly registers this
-    //     exact prefix) but not domain-verified like (1). Used only if the
-    //     Universal Link doesn't seem to have opened the app.
+    // The Continue link always points at a Universal Link
+    // (LAUNCH_ORIGIN + /launch?u=<raw target>), domain-bound via the app's
+    // com.apple.developer.associated-domains entitlement + an
+    // apple-app-site-association hosted on this origin — a competing wallet
+    // cannot claim someone else's domain, unlike a custom URL scheme. If the
+    // OS doesn't intercept it (app not installed, Associated Domains not
+    // verified yet, or no App Links equivalent configured for the platform),
+    // the browser actually navigates to /launch, which drives the
+    // careerpassport-infy-*/careerpassport-interaction: custom-scheme
+    // fallback from there (see public/launch/index.html) — this page has no
+    // fallback logic of its own; see chapiDeepLink.ts for that mirror.
     var LAUNCH_ORIGIN = 'https://chapi.careerspassports.com';
     var RECOGNIZED_SCHEMES = ['openid4vp://', 'mdoc-openid4vp://', 'openid-credential-offer://'];
-    var SCHEME_REWRITES = [
-      ['mdoc-openid4vp://', 'careerpassport-infy-mdoc-openid4vp://'],
-      ['openid4vp://', 'careerpassport-infy-openid4vp://'],
-      ['openid-credential-offer://', 'careerpassport-infy-openid-credential-offer://'],
-    ];
-
-    function rewriteScheme(url) {
-      var lower = url.toLowerCase();
-      for (var i = 0; i < SCHEME_REWRITES.length; i++) {
-        var from = SCHEME_REWRITES[i][0], to = SCHEME_REWRITES[i][1];
-        if (lower.indexOf(from) === 0) return to + url.slice(from.length);
-      }
-      return url;
-    }
 
     // Raw (un-rewritten) target for an entry, or null if this page doesn't
     // know how to hand it off. For vcapi this is the bare exchange/discovery
@@ -71,12 +58,6 @@
       var u = new URL(LAUNCH_ORIGIN + '/launch');
       u.searchParams.set('u', rawUrl);
       return u.toString();
-    }
-
-    function fallbackSchemeLink(entry, rawUrl) {
-      return entry.kind === 'vcapi'
-        ? 'careerpassport-interaction:' + encodeURIComponent(rawUrl)
-        : rewriteScheme(rawUrl);
     }
 
     function extractProtocols(event) {
@@ -112,28 +93,13 @@
     continueLink.addEventListener('click', function () {
       titleEl.textContent = 'Opening Career Passport…';
       subtitleEl.textContent = "If the app didn't open, tap the button again.";
-      var launched = false;
-      var onVisibility = function () {
-        if (document.hidden) {
-          launched = true;
-          document.removeEventListener('visibilitychange', onVisibility);
-          respondOutOfBand();
-        }
-      };
-      document.addEventListener('visibilitychange', onVisibility);
-
-      // The <a> click already navigates to the Universal Link (href). If that
-      // hasn't backgrounded the tab shortly after — app not installed, or the
-      // OS didn't route it to the app for some reason — retry with the
-      // app-exclusive custom-scheme fallback.
-      var fallback = continueLink.dataset.fallback;
-      if (fallback) {
-        setTimeout(function () {
-          if (!launched) window.location.href = fallback;
-        }, 1500);
-      }
-
-      setTimeout(respondOutOfBand, 10000);
+      // Whether the OS intercepts the Universal Link (app opens directly) or
+      // not (browser navigates to /launch for real, which drives the
+      // custom-scheme fallback from there), the interaction proceeds outside
+      // this page either way. iOS decides synchronously at tap time, before
+      // any network activity, so there's no reliable "did it open" signal
+      // left to wait for here — just respond immediately.
+      respondOutOfBand();
     });
 
     WebCredentialHandler.receiveCredentialEvent()
@@ -151,11 +117,7 @@
         for (var i = 0; i < protocols.length; i++) {
           var raw = rawTargetFor(protocols[i]);
           if (raw) {
-            chosen = {
-              protocol: protocols[i],
-              primary: universalLink(raw),
-              fallback: fallbackSchemeLink(protocols[i], raw),
-            };
+            chosen = {protocol: protocols[i], primary: universalLink(raw)};
             break;
           }
         }
@@ -169,7 +131,6 @@
         titleEl.textContent = 'Review in Career Passport';
         subtitleEl.textContent = 'Open the app to review this request before anything is added or shared.';
         continueLink.href = chosen.primary;
-        continueLink.dataset.fallback = chosen.fallback;
         continueWrap.style.display = 'block';
       })
       .catch(function (err) {

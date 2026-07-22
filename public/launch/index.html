@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Career Passport</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f8; margin: 0; }
+    main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+    h1 { font-size: 22px; color: #111827; margin-bottom: 8px; }
+    p { color: #555; max-width: 320px; margin-top: 2px; }
+    a.btn { display: inline-block; margin-top: 20px; background: #2563eb; color: #fff; border-radius: 999px; padding: 12px 24px; font-size: 15px; font-weight: 600; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title">Opening Career Passport…</h1>
+    <p id="subtitle">If nothing happens, tap the button below.</p>
+    <div id="continueWrap" style="display:none">
+      <a id="continueLink" class="btn" href="#">Open Career Passport</a>
+    </div>
+  </main>
+  <script>
+    // Reached only when the OS did NOT intercept the Universal Link that
+    // pointed here (present/index.html's Continue button) — i.e. the app
+    // isn't installed, or Associated Domains verification hasn't completed
+    // yet, or (today) the platform has no App Links equivalent configured
+    // (Android). Mirrors the rewrite table in
+    // shared/qrHandlers/handlers/chapiDeepLink.ts and present/index.html.
+    var RECOGNIZED_SCHEMES = ['openid4vp://', 'mdoc-openid4vp://', 'openid-credential-offer://'];
+    var SCHEME_REWRITES = [
+      ['mdoc-openid4vp://', 'careerpassport-infy-mdoc-openid4vp://'],
+      ['openid4vp://', 'careerpassport-infy-openid4vp://'],
+      ['openid-credential-offer://', 'careerpassport-infy-openid-credential-offer://'],
+    ];
+
+    function rewriteScheme(url) {
+      var lower = url.toLowerCase();
+      for (var i = 0; i < SCHEME_REWRITES.length; i++) {
+        var from = SCHEME_REWRITES[i][0], to = SCHEME_REWRITES[i][1];
+        if (lower.indexOf(from) === 0) return to + url.slice(from.length);
+      }
+      return null;
+    }
+
+    function fallbackFor(rawUrl) {
+      var trimmed = rawUrl.trim();
+      if (/^https?:\/\//i.test(trimmed)) {
+        return 'careerpassport-interaction:' + encodeURIComponent(trimmed);
+      }
+      var lower = trimmed.toLowerCase();
+      for (var i = 0; i < RECOGNIZED_SCHEMES.length; i++) {
+        if (lower.indexOf(RECOGNIZED_SCHEMES[i]) === 0) return rewriteScheme(trimmed);
+      }
+      return null;
+    }
+
+    var titleEl = document.getElementById('title');
+    var subtitleEl = document.getElementById('subtitle');
+    var continueWrap = document.getElementById('continueWrap');
+    var continueLink = document.getElementById('continueLink');
+
+    var target = new URLSearchParams(window.location.search).get('u');
+    var fallback = target && fallbackFor(target);
+
+    if (!fallback) {
+      titleEl.textContent = 'Unsupported request';
+      subtitleEl.textContent = "This link is missing or has a request Career Passport can't open.";
+    } else {
+      continueLink.href = fallback;
+      continueWrap.style.display = 'block';
+      // Best-effort automatic attempt; the visible button is the reliable path
+      // (some mobile browsers block a synchronous custom-scheme redirect on
+      // page load without a user gesture).
+      window.location.href = fallback;
+    }
+  </script>
+</body>
+</html>
