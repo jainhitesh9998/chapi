@@ -23,10 +23,17 @@
 
   <script src="https://unpkg.com/web-credential-handler@2/dist/web-credential-handler.min.js"></script>
   <script>
-    // Mirrors the deep-link scheme rewrite table in this app's
-    // shared/qrHandlers/handlers/chapiDeepLink.ts — same prefixes, so the
-    // native app's registered intent-filters / CFBundleURLSchemes route
-    // these straight back into the wallet.
+    // Two ways this hands off to the app, tried in order:
+    //  1. Universal Link (LAUNCH_ORIGIN + /launch?u=<raw target>) — domain-bound
+    //     via the app's com.apple.developer.associated-domains entitlement +
+    //     the apple-app-site-association hosted on this origin. A competing
+    //     wallet cannot register this origin, so this is the bullet-proof form.
+    //  2. careerpassport-infy-*/careerpassport-interaction: custom scheme —
+    //     mirrors shared/qrHandlers/handlers/chapiDeepLink.ts's rewrite table.
+    //     App-exclusive in practice (no other wallet plausibly registers this
+    //     exact prefix) but not domain-verified like (1). Used only if the
+    //     Universal Link doesn't seem to have opened the app.
+    var LAUNCH_ORIGIN = 'https://chapi.careerspassports.com';
     var RECOGNIZED_SCHEMES = ['openid4vp://', 'mdoc-openid4vp://', 'openid-credential-offer://'];
     var SCHEME_REWRITES = [
       ['mdoc-openid4vp://', 'careerpassport-infy-mdoc-openid4vp://'],
@@ -43,26 +50,33 @@
       return url;
     }
 
-    function schemeDeepLink(url) {
-      if (typeof url !== 'string') return null;
-      var lower = url.toLowerCase();
+    // Raw (un-rewritten) target for an entry, or null if this page doesn't
+    // know how to hand it off. For vcapi this is the bare exchange/discovery
+    // URL; for the others it's the untouched openid4vp:// etc. deep link.
+    function rawTargetFor(entry) {
+      if (entry.kind === 'vcapi') {
+        if (typeof entry.url !== 'string') return null;
+        var trimmed = entry.url.trim();
+        return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+      }
+      if (typeof entry.url !== 'string') return null;
+      var lower = entry.url.toLowerCase();
       for (var i = 0; i < RECOGNIZED_SCHEMES.length; i++) {
-        if (lower.indexOf(RECOGNIZED_SCHEMES[i]) === 0) return rewriteScheme(url);
+        if (lower.indexOf(RECOGNIZED_SCHEMES[i]) === 0) return entry.url;
       }
       return null;
     }
 
-    // vcapi (VC-API exchange URL) is wrapped as an opaque
-    // careerpassport-interaction: deep link. The app decodes it and resolves
-    // the protocols envelope itself (it already prefers OID4VCI/OID4VP over
-    // vcapi when more than one is present) — this page does not drive the
-    // VC-API exchange, it only hands the URL off.
-    function interactionDeepLink(url) {
-      if (typeof url !== 'string') return null;
-      var trimmed = url.trim();
-      return /^https?:\/\//i.test(trimmed)
-        ? 'careerpassport-interaction:' + encodeURIComponent(trimmed)
-        : null;
+    function universalLink(rawUrl) {
+      var u = new URL(LAUNCH_ORIGIN + '/launch');
+      u.searchParams.set('u', rawUrl);
+      return u.toString();
+    }
+
+    function fallbackSchemeLink(entry, rawUrl) {
+      return entry.kind === 'vcapi'
+        ? 'careerpassport-interaction:' + encodeURIComponent(rawUrl)
+        : rewriteScheme(rawUrl);
     }
 
     function extractProtocols(event) {
@@ -82,10 +96,6 @@
       return list;
     }
 
-    function deepLinkFor(entry) {
-      return entry.kind === 'vcapi' ? interactionDeepLink(entry.url) : schemeDeepLink(entry.url);
-    }
-
     var titleEl = document.getElementById('title');
     var subtitleEl = document.getElementById('subtitle');
     var continueWrap = document.getElementById('continueWrap');
@@ -102,13 +112,27 @@
     continueLink.addEventListener('click', function () {
       titleEl.textContent = 'Opening Career Passport…';
       subtitleEl.textContent = "If the app didn't open, tap the button again.";
+      var launched = false;
       var onVisibility = function () {
         if (document.hidden) {
+          launched = true;
           document.removeEventListener('visibilitychange', onVisibility);
           respondOutOfBand();
         }
       };
       document.addEventListener('visibilitychange', onVisibility);
+
+      // The <a> click already navigates to the Universal Link (href). If that
+      // hasn't backgrounded the tab shortly after — app not installed, or the
+      // OS didn't route it to the app for some reason — retry with the
+      // app-exclusive custom-scheme fallback.
+      var fallback = continueLink.dataset.fallback;
+      if (fallback) {
+        setTimeout(function () {
+          if (!launched) window.location.href = fallback;
+        }, 1500);
+      }
+
       setTimeout(respondOutOfBand, 10000);
     });
 
@@ -125,8 +149,15 @@
         }
         var chosen = null;
         for (var i = 0; i < protocols.length; i++) {
-          var link = deepLinkFor(protocols[i]);
-          if (link) { chosen = {protocol: protocols[i], link: link}; break; }
+          var raw = rawTargetFor(protocols[i]);
+          if (raw) {
+            chosen = {
+              protocol: protocols[i],
+              primary: universalLink(raw),
+              fallback: fallbackSchemeLink(protocols[i], raw),
+            };
+            break;
+          }
         }
         if (!chosen) {
           titleEl.textContent = 'Unsupported request';
@@ -137,7 +168,8 @@
         console.log('[CHAPI present] chosen protocol:', chosen.protocol.kind);
         titleEl.textContent = 'Review in Career Passport';
         subtitleEl.textContent = 'Open the app to review this request before anything is added or shared.';
-        continueLink.href = chosen.link;
+        continueLink.href = chosen.primary;
+        continueLink.dataset.fallback = chosen.fallback;
         continueWrap.style.display = 'block';
       })
       .catch(function (err) {
