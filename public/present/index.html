@@ -53,15 +53,15 @@
     }
 
     // vcapi (VC-API exchange URL) is wrapped as an opaque
-    // careerpassport-interaction: deep link. The app decodes it and resolves
-    // the protocols envelope itself (it already prefers OID4VCI/OID4VP over
-    // vcapi when more than one is present) — this page does not drive the
-    // VC-API exchange, it only hands the URL off.
+    // careerpassport-infy-interaction: deep link. The app decodes it and
+    // resolves the protocols envelope itself (it already prefers
+    // OID4VCI/OID4VP over vcapi when more than one is present) — this page
+    // does not drive the VC-API exchange, it only hands the URL off.
     function interactionDeepLink(url) {
       if (typeof url !== 'string') return null;
       var trimmed = url.trim();
       return /^https?:\/\//i.test(trimmed)
-        ? 'careerpassport-interaction:' + encodeURIComponent(trimmed)
+        ? 'careerpassport-infy-interaction:' + encodeURIComponent(trimmed)
         : null;
     }
 
