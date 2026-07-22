@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Career Passport — Switchboard</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f8; margin: 0; }
+    main { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    p { color: #555; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main><p id="status">Connecting to wallet mediator…</p></main>
+
+  <script src="https://unpkg.com/credential-handler-polyfill@3/dist/credential-handler-polyfill.min.js"></script>
+  <script src="https://unpkg.com/web-credential-handler@2/dist/web-credential-handler.min.js"></script>
+  <script>
+    // This is the credential_handler.url declared in /manifest.json — the
+    // CHAPI mediator (authn.io) loads THIS page (in a hidden handler window)
+    // once the user picks "Career Passport" from the wallet chooser. It does
+    // not render any UI of its own: it just tells CHAPI to redirect the
+    // handler window to /present/, which re-receives the same event and
+    // does the actual protocol-picking + deep-link handoff into the app.
+    var status = document.getElementById('status');
+
+    Promise.resolve()
+      .then(function () { return credentialHandlerPolyfill.loadOnce(); })
+      .then(function () {
+        return WebCredentialHandler.activateHandler({
+          mediatorOrigin: 'https://authn.io',
+          get: function () {
+            return Promise.resolve({
+              type: 'redirect',
+              url: window.location.origin + '/present/',
+            });
+          },
+          store: function () {
+            return Promise.resolve({
+              type: 'redirect',
+              url: window.location.origin + '/present/',
+            });
+          },
+        });
+      })
+      .then(function () {
+        status.textContent = 'Ready.';
+      })
+      .catch(function (err) {
+        console.error('CHAPI handler activation failed', err);
+        status.textContent = 'Handler error: ' + (err && err.message ? err.message : err);
+      });
+  </script>
+</body>
+</html>

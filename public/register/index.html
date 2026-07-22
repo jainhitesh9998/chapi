@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Career Passport — Register Wallet</title>
+  <link rel="manifest" href="/manifest.json" />
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f8; margin: 0; }
+    main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+    h1 { font-size: 22px; color: #111827; }
+    p { color: #555; max-width: 320px; }
+    button, a.btn { display: inline-block; margin-top: 20px; background: #2563eb; color: #fff; border: none; border-radius: 999px; padding: 12px 24px; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    small { display: block; margin-top: 10px; color: #555; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Set up Career Passport</h1>
+    <p>Use Career Passport to get credentials from schools, programs, and other approved sites.</p>
+    <p>You can also use it to share your credentials when you choose.</p>
+    <button id="registerBtn">Continue</button>
+    <small id="status"></small>
+  </main>
+
+  <script src="https://unpkg.com/credential-handler-polyfill@3/dist/credential-handler-polyfill.min.js"></script>
+  <script src="https://unpkg.com/web-credential-handler@2/dist/web-credential-handler.min.js"></script>
+  <script>
+    // Redirect used to hand control back to the native app once this origin
+    // is installed as a browser Credential Handler. The app registers this
+    // custom scheme (see docs/chapi-integration.md) purely to catch this
+    // callback and show a confirmation.
+    var REGISTERED_REDIRECT = 'careerpassport-chapi-registered://registered';
+
+    var btn = document.getElementById('registerBtn');
+    var status = document.getElementById('status');
+
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      status.textContent = 'Registering…';
+      Promise.resolve()
+        .then(function () { return credentialHandlerPolyfill.loadOnce(); })
+        .then(function () { return WebCredentialHandler.installHandler(); })
+        .then(function () {
+          status.textContent = 'Registered! Returning to Career Passport…';
+          window.location.href = REGISTERED_REDIRECT;
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          status.textContent = 'Registration failed: ' + (err && err.message ? err.message : err);
+        });
+    });
+  </script>
+</body>
+</html>

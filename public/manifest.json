@@ -1,0 +1,10 @@
+{
+  "name": "Career Passport",
+  "short_name": "Career Passport",
+  "icons": [],
+  "credential_handler": {
+    "url": "/switchboard/",
+    "enabledTypes": ["VerifiablePresentation"],
+    "acceptedProtocols": ["OID4VCI", "OID4VP", "vcapi"]
+  }
+}

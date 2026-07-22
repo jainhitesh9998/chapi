@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Career Passport</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f8; margin: 0; }
+    main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+    h1 { font-size: 22px; color: #111827; margin-bottom: 8px; }
+    p { color: #555; max-width: 320px; margin-top: 2px; }
+    a.btn { display: inline-block; margin-top: 20px; background: #2563eb; color: #fff; border-radius: 999px; padding: 12px 24px; font-size: 15px; font-weight: 600; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title">Opening Career Passport…</h1>
+    <p id="subtitle">Preparing your request…</p>
+    <div id="continueWrap" style="display:none">
+      <a id="continueLink" class="btn" href="#" target="_top">Continue</a>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/web-credential-handler@2/dist/web-credential-handler.min.js"></script>
+  <script>
+    // Mirrors the deep-link scheme rewrite table in this app's
+    // shared/qrHandlers/handlers/chapiDeepLink.ts — same prefixes, so the
+    // native app's registered intent-filters / CFBundleURLSchemes route
+    // these straight back into the wallet.
+    var RECOGNIZED_SCHEMES = ['openid4vp://', 'mdoc-openid4vp://', 'openid-credential-offer://'];
+    var SCHEME_REWRITES = [
+      ['mdoc-openid4vp://', 'careerpassport-mdoc-openid4vp://'],
+      ['openid4vp://', 'careerpassport-openid4vp://'],
+      ['openid-credential-offer://', 'careerpassport-openid-credential-offer://'],
+    ];
+
+    function rewriteScheme(url) {
+      var lower = url.toLowerCase();
+      for (var i = 0; i < SCHEME_REWRITES.length; i++) {
+        var from = SCHEME_REWRITES[i][0], to = SCHEME_REWRITES[i][1];
+        if (lower.indexOf(from) === 0) return to + url.slice(from.length);
+      }
+      return url;
+    }
+
+    function schemeDeepLink(url) {
+      if (typeof url !== 'string') return null;
+      var lower = url.toLowerCase();
+      for (var i = 0; i < RECOGNIZED_SCHEMES.length; i++) {
+        if (lower.indexOf(RECOGNIZED_SCHEMES[i]) === 0) return rewriteScheme(url);
+      }
+      return null;
+    }
+
+    // vcapi (VC-API exchange URL) is wrapped as an opaque
+    // careerpassport-interaction: deep link. The app decodes it and resolves
+    // the protocols envelope itself (it already prefers OID4VCI/OID4VP over
+    // vcapi when more than one is present) — this page does not drive the
+    // VC-API exchange, it only hands the URL off.
+    function interactionDeepLink(url) {
+      if (typeof url !== 'string') return null;
+      var trimmed = url.trim();
+      return /^https?:\/\//i.test(trimmed)
+        ? 'careerpassport-interaction:' + encodeURIComponent(trimmed)
+        : null;
+    }
+
+    function extractProtocols(event) {
+      return (event && event.credentialRequestOptions && event.credentialRequestOptions.web && event.credentialRequestOptions.web.protocols)
+        || (event && event.credentialRequestOptions && event.credentialRequestOptions.protocols)
+        || (event && event.protocols)
+        || (event && event.credential && event.credential.options && event.credential.options.web && event.credential.options.web.protocols)
+        || (event && event.credential && event.credential.options && event.credential.options.protocols);
+    }
+
+    function protocolList(protocols) {
+      if (!protocols) return [];
+      var list = [];
+      if (protocols.OID4VP) list.push({kind: 'OID4VP', url: protocols.OID4VP});
+      if (protocols.OID4VCI) list.push({kind: 'OID4VCI', url: protocols.OID4VCI});
+      if (protocols.vcapi) list.push({kind: 'vcapi', url: protocols.vcapi});
+      return list;
+    }
+
+    function deepLinkFor(entry) {
+      return entry.kind === 'vcapi' ? interactionDeepLink(entry.url) : schemeDeepLink(entry.url);
+    }
+
+    var titleEl = document.getElementById('title');
+    var subtitleEl = document.getElementById('subtitle');
+    var continueWrap = document.getElementById('continueWrap');
+    var continueLink = document.getElementById('continueLink');
+    var respondWith = null;
+    var responded = false;
+
+    function respondOutOfBand() {
+      if (responded) return;
+      responded = true;
+      if (respondWith) respondWith(Promise.resolve({dataType: 'OutOfBand', data: null}));
+    }
+
+    continueLink.addEventListener('click', function () {
+      titleEl.textContent = 'Opening Career Passport…';
+      subtitleEl.textContent = "If the app didn't open, tap the button again.";
+      var onVisibility = function () {
+        if (document.hidden) {
+          document.removeEventListener('visibilitychange', onVisibility);
+          respondOutOfBand();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      setTimeout(respondOutOfBand, 10000);
+    });
+
+    WebCredentialHandler.receiveCredentialEvent()
+      .then(function (event) {
+        respondWith = event.respondWith;
+        var protocols = protocolList(extractProtocols(event));
+        console.log('[CHAPI present] available protocols:', protocols.map(function (p) { return p.kind; }));
+        if (protocols.length === 0) {
+          titleEl.textContent = 'Unsupported request';
+          subtitleEl.textContent = 'Career Passport handles OID4VP, OID4VCI, and VC-API, but this request offered none.';
+          respondOutOfBand();
+          return;
+        }
+        var chosen = null;
+        for (var i = 0; i < protocols.length; i++) {
+          var link = deepLinkFor(protocols[i]);
+          if (link) { chosen = {protocol: protocols[i], link: link}; break; }
+        }
+        if (!chosen) {
+          titleEl.textContent = 'Unsupported request';
+          subtitleEl.textContent = "This request's endpoints are not URLs Career Passport can open.";
+          respondOutOfBand();
+          return;
+        }
+        console.log('[CHAPI present] chosen protocol:', chosen.protocol.kind);
+        titleEl.textContent = 'Review in Career Passport';
+        subtitleEl.textContent = 'Open the app to review this request before anything is added or shared.';
+        continueLink.href = chosen.link;
+        continueWrap.style.display = 'block';
+      })
+      .catch(function (err) {
+        console.error('Failed to receive CHAPI event', err);
+        titleEl.textContent = 'Could not receive the request';
+        subtitleEl.textContent = String(err && err.message ? err.message : err);
+      });
+  </script>
+</body>
+</html>
